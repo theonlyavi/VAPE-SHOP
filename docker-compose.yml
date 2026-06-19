@@ -1,0 +1,87 @@
+version: '3.9'
+
+services:
+  # ── PostgreSQL ─────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: vapeshop_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: vapeshop
+      POSTGRES_PASSWORD: vapeshop_pass
+      POSTGRES_DB: vapeshop_db
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - '5432:5432'
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U vapeshop']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - vapeshop_net
+
+  # ── NestJS Backend ─────────────────────────────────────────────────────────
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: vapeshop_api
+    restart: unless-stopped
+    env_file: ./backend/.env
+    environment:
+      DATABASE_URL: postgresql://vapeshop:vapeshop_pass@postgres:5432/vapeshop_db
+      NODE_ENV: production
+      PORT: 4000
+    volumes:
+      - uploads_data:/app/uploads
+    ports:
+      - '4000:4000'
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - vapeshop_net
+
+  # ── Next.js Frontend ───────────────────────────────────────────────────────
+  web:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: http://api:4000
+    container_name: vapeshop_web
+    restart: unless-stopped
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:4000
+    ports:
+      - '3000:3000'
+    depends_on:
+      - api
+    networks:
+      - vapeshop_net
+
+  # ── Nginx Reverse Proxy ────────────────────────────────────────────────────
+  nginx:
+    build:
+      context: ./nginx
+      dockerfile: Dockerfile
+    container_name: vapeshop_nginx
+    restart: unless-stopped
+    ports:
+      - '80:80'
+      - '443:443'
+    depends_on:
+      - web
+      - api
+    networks:
+      - vapeshop_net
+
+volumes:
+  postgres_data:
+  uploads_data:
+
+networks:
+  vapeshop_net:
+    driver: bridge
